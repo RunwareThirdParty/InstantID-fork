@@ -48,6 +48,9 @@ else:
     from ip_adapter.attention_processor import IPAttnProcessor, AttnProcessor
 from ip_adapter.attention_processor import region_control
 
+import gc
+
+
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
@@ -621,6 +624,29 @@ class StableDiffusionXLInstantIDPipeline(StableDiffusionXLControlNetPipeline):
         prompt_image_emb = prompt_image_emb.view(bs_embed * num_images_per_prompt, seq_len, -1)
         
         return prompt_image_emb.to(device=device, dtype=dtype)
+
+
+    def unload_ip_adapter_instandid(self):
+        """
+        Cleanly unload IP adapter modules and free associated GPU memory.
+        """
+        # Reset attention processors if UNet exists
+        if hasattr(self, "unet") and hasattr(self.unet, "attn_processors"):
+            unet = self.unet
+            unet.set_attn_processor({
+                name: AttnProcessor().to(unet.device, dtype=unet.dtype)
+                for name in unet.attn_processors.keys()
+            })
+
+        # Remove IP adapter-related projection layers if present
+        for attr in ["image_proj_model", "image_proj_model_in_features"]:
+            if hasattr(self, attr):
+                setattr(self, attr, None)
+
+        # Free CUDA memory and trigger Python garbage collection
+        torch.cuda.empty_cache()
+        gc.collect()
+
 
     @torch.no_grad()
     @replace_example_docstring(EXAMPLE_DOC_STRING)
